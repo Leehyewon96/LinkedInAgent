@@ -2,6 +2,7 @@
 
 import anthropic
 import json
+import requests
 from dotenv import load_dotenv
 from pathlib import Path
 from collector import collect_rss, RSS_FEEDS
@@ -9,6 +10,21 @@ from collector import collect_rss, RSS_FEEDS
 load_dotenv(Path(__file__).parent.parent / ".env")  # 상위 폴더의 .env 읽기
 
 client = anthropic.Anthropic()
+
+
+def is_valid_url(url: str) -> bool:
+    """URL이 실제로 접근 가능한지 확인 (404·연결 오류 제외)"""
+    try:
+        response = requests.head(
+            url,
+            timeout=5,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},  # 봇 차단 우회
+        )
+        return response.status_code < 400
+    except requests.RequestException:
+        return False
+
 
 def curate_topics(sources: list[dict]) -> list[dict]:
     content = "\n".join(
@@ -49,10 +65,24 @@ def curate_topics(sources: list[dict]) -> list[dict]:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    
-    print("Claude 응답 원문:", raw)  # 뭐가 오는지 확인용
+
+    print("Claude 응답 원문:", raw)
     topics = json.loads(raw)
-    return topics
+
+    # 유효한 링크만 남기기
+    valid_topics = []
+    for topic in topics:
+        url = topic.get("source_link", "")
+        if is_valid_url(url):
+            valid_topics.append(topic)
+            print(f"  ✅ 유효: {url}")
+        else:
+            print(f"  ❌ 무효 (제외): {url}")
+
+    if not valid_topics:
+        raise ValueError("유효한 링크가 있는 주제가 없습니다. 수집 소스를 확인해주세요.")
+
+    return valid_topics
 
 
 if __name__ == "__main__":
